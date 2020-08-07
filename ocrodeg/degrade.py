@@ -3,7 +3,6 @@ import warnings
 from random import randint
 
 import numpy as np
-import pylab
 import scipy.ndimage as ndi
 from numpy import *
 
@@ -11,8 +10,8 @@ from numpy import *
 def autoinvert(image):
     assert amin(image) >= 0
     assert amax(image) <= 1
-    if sum(image>0.9) > sum(image<0.1):
-        return 1-image
+    if np.sum(image > 0.9) > np.sum(image < 0.1):
+        return 1 - image
     else:
         return image
 
@@ -42,13 +41,16 @@ def transform_image(image, angle=0.0, scale=1.0, aniso=1.0, translation=(0, 0), 
     d = c - np.dot(m, c) + np.array([dx * w, dy * h])
     return ndi.affine_transform(image, m, offset=d, order=order, mode="nearest", output=dtype("f"))
 
+def random_pad(image, horizontal=(0, 100)):
+    l, r = np.random.randint(*horizontal, size=1), np.random.randint(*horizontal, size=1)
+    return np.pad(image, ((l[0], r[0]), (0, 0)), mode="constant")
 #
 # random distortions
 #
 
 def bounded_gaussian_noise(shape, sigma, maxdelta):
     n, m = shape
-    deltas = pylab.rand(2, n, m)
+    deltas = np.random.rand(2, n, m)
     deltas = ndi.gaussian_filter(deltas, (0, sigma, sigma))
     deltas -= np.amin(deltas)
     deltas /= np.amax(deltas)
@@ -67,7 +69,7 @@ def distort_with_noise(image, deltas, order=1):
 
 def noise_distort1d(shape, sigma=100.0, magnitude=100.0):
     h, w = shape
-    noise = ndi.gaussian_filter(pylab.randn(w), sigma)
+    noise = ndi.gaussian_filter(np.random.randn(w), sigma)
     noise *= magnitude / amax(abs(noise))
     dys = array([noise]*h)
     deltas = array([dys, zeros((h, w))])
@@ -86,7 +88,7 @@ def binary_blur(image, sigma, noise=0.0):
     p = percent_black(image)
     blurred = ndi.gaussian_filter(image, sigma)
     if noise > 0:
-        blurred += pylab.randn(*blurred.shape) * noise
+        blurred += np.random.randn(*blurred.shape) * noise
     t = percentile(blurred, p)
     return array(blurred > t, 'f')
 
@@ -97,25 +99,25 @@ def binary_blur(image, sigma, noise=0.0):
 def make_noise_at_scale(shape, scale):
     h, w = shape
     h0, w0 = int(h/scale+1), int(w/scale+1)
-    data = pylab.rand(h0, w0)
+    data = np.random.rand(h0, w0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = ndi.zoom(data, scale)
     return result[:h, :w]
 
-def make_multiscale_noise(shape, scales, weights=None, limits=(0.0, 1.0)):
+def make_multiscale_noise(shape, scales, weights=None, span=(0.0, 1.0)):
     if weights is None: weights = [1.0] * len(scales)
     result = make_noise_at_scale(shape, scales[0]) * weights[0]
     for s, w in zip(scales, weights):
         result += make_noise_at_scale(shape, s) * w
-    lo, hi = limits
+    lo, hi = span
     result -= amin(result)
     result /= amax(result)
     result *= (hi-lo)
     result += lo
     return result
 
-def make_multiscale_noise_uniform(shape, srange=(1.0, 100.0), nscales=4, limits=(0.0, 1.0)):
+def make_multiscale_noise_uniform(shape, srange=(1.0, 100.0), nscales=4, span=(0.0, 1.0)):
     lo, hi = log10(srange[0]), log10(srange[1])
     scales = np.random.uniform(size=nscales)
     scales = add.accumulate(scales)
@@ -125,7 +127,7 @@ def make_multiscale_noise_uniform(shape, srange=(1.0, 100.0), nscales=4, limits=
     scales += lo
     scales = 10**scales
     weights = 2.0 * np.random.uniform(size=nscales)
-    return make_multiscale_noise(shape, scales, weights=weights, limits=limits)
+    return make_multiscale_noise(shape, scales, weights=weights, span=span)
 
 #
 # random blobs
@@ -144,7 +146,7 @@ def random_blobs(shape, blobdensity, size, roughness=2.0):
     mask = ndi.gaussian_filter(mask, size/(2*roughness))
     mask -= np.amin(mask)
     mask /= np.amax(mask)
-    noise = pylab.rand(h, w)
+    noise = np.random.rand(h, w)
     noise = ndi.gaussian_filter(noise, size/(2*roughness))
     noise -= np.amin(noise)
     noise /= np.amax(noise)
@@ -161,18 +163,19 @@ def random_blotches(image, fgblobs, bgblobs, fgscale=10, bgscale=10):
 
 def make_fiber(l, a, stepsize=0.5):
     angles = np.random.standard_cauchy(l) * a
-    angles[0] += 2 * pi * pylab.rand()
+    angles[0] += 2 * pi * np.random.rand()
     angles = add.accumulate(angles)
     coss = add.accumulate(cos(angles)*stepsize)
     sins = add.accumulate(sin(angles)*stepsize)
     return array([coss, sins]).transpose(1, 0)
 
-def make_fibrous_image(shape, nfibers=300, l=300, a=0.2, stepsize=0.5, limits=(0.1, 1.0), blur=1.0):
+def make_fibrous_image(shape, nfibers=300, l=300, a=0.2, stepsize=0.5, span=(0.1, 1.0), blur=1.0):
+    from builtins import range  # python2 compatible
     h, w = shape
-    lo, hi = limits
+    lo, hi = span
     result = zeros(shape)
     for i in range(nfibers):
-        v = pylab.rand() * (hi-lo) + lo
+        v = np.random.rand() * (hi-lo) + lo
         fiber = make_fiber(l, a, stepsize=stepsize)
         y, x = randint(0, h-1), randint(0, w-1)
         fiber[:, 0] += y
@@ -193,22 +196,40 @@ def make_fibrous_image(shape, nfibers=300, l=300, a=0.2, stepsize=0.5, limits=(0
 # print-like degradation with multiscale noise
 #
 
-def printlike_multiscale(image, blur=1.0, blotches=5e-5):
-    selector = autoinvert(image)
+def printlike_multiscale(image, blur=1.0, blotches=5e-5, inverted=None):
+    if inverted:
+        selector = image
+    elif inverted is None:
+        selector = autoinvert(image)
+    else:
+        selector = 1 - image
+
     selector = random_blotches(selector, 3*blotches, blotches)
-    paper = make_multiscale_noise_uniform(image.shape, limits=(0.5, 1.0))
-    ink = make_multiscale_noise_uniform(image.shape, limits=(0.0, 0.5))
-    blurred = ndi.gaussian_filter(selector, blur)
+    paper = make_multiscale_noise_uniform(image.shape, span=(0.8, 1.0))
+    ink = make_multiscale_noise_uniform(image.shape, span=(0.0, 0.2))
+    blurred = (ndi.gaussian_filter(selector, blur) + selector) / 2
     printed = blurred * ink + (1-blurred) * paper
-    return printed
+    if inverted:
+        return 1 - printed
+    else:
+        return printed
 
 
-def printlike_fibrous(image, blur=1.0, blotches=5e-5):
-    selector = autoinvert(image)
+def printlike_fibrous(image, blur=1.0, blotches=5e-5, inverted=None):
+    if inverted:
+        selector = image
+    elif inverted is None:
+        selector = autoinvert(image)
+    else:
+        selector = 1 - image
+
     selector = random_blotches(selector, 3*blotches, blotches)
-    paper = make_multiscale_noise(image.shape, [1.0, 5.0, 10.0, 50.0], weights=[1.0, 0.3, 0.5, 0.3], limits=(0.7, 1.0))
-    paper -= make_fibrous_image(image.shape, 300, 500, 0.01, limits=(0.0, 0.25), blur=0.5)
-    ink = make_multiscale_noise(image.shape, [1.0, 5.0, 10.0, 50.0], limits=(0.0, 0.5))
+    paper = make_multiscale_noise(image.shape, [1.0, 5.0, 10.0, 50.0], weights=[1.0, 0.3, 0.5, 0.3], span=(0.7, 1.0))
+    paper -= make_fibrous_image(image.shape, 300, 500, 0.01, span=(0.0, 0.25), blur=0.5)
+    ink = make_multiscale_noise(image.shape, [1.0, 5.0, 10.0, 50.0], span=(0.0, 0.5))
     blurred = ndi.gaussian_filter(selector, blur)
     printed = blurred * ink + (1-blurred) * paper
-    return printed
+    if inverted:
+        return 1 - printed
+    else:
+        return printed
